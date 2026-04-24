@@ -30,10 +30,19 @@
       box-sizing: border-box;
     }
 
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      background: #000;
+      height: 100%;
+      overflow: hidden;
+    }
+
     body {
       margin: 0;
       min-height: 100vh;
-      background: radial-gradient(circle at top, #1d2230, var(--bg) 55%);
+      background: #000;
       color: var(--text);
       font-family: Inter, Segoe UI, Roboto, Arial, sans-serif;
       display: flex;
@@ -47,6 +56,7 @@
 
     .app {
       width: min(1200px, 100%);
+      min-height: 100vh;
       background: rgba(24, 27, 34, 0.9);
       border: 1px solid #2a3040;
       border-radius: 16px;
@@ -159,7 +169,7 @@
       align-items: flex-end;
       padding-bottom: 9px;
       color: #333a4a;
-      font-size: 0.7rem;
+      font-size: 9px;
       font-weight: 700;
     }
 
@@ -173,7 +183,7 @@
       border-radius: 0 0 6px 6px;
       z-index: 2;
       color: #b9c1d5;
-      font-size: 0.63rem;
+      font-size: 9px;
       display: flex;
       justify-content: center;
       align-items: flex-end;
@@ -197,8 +207,8 @@
 
     @media (max-height: 500px) and (orientation: landscape) {
       :root {
-        --white-key-height: 80px;
-        --black-key-height: 50px;
+        --white-key-height: 120px;
+        --black-key-height: 75px;
       }
 
       body {
@@ -220,12 +230,12 @@
       }
 
       .pitch-panel {
-        height: 80px;
+        height: 90px;
         margin-bottom: 8px;
       }
 
       .needle {
-        height: 64px;
+        height: 72px;
       }
 
       .keyboard-frame {
@@ -267,11 +277,12 @@
     const MAX_MIDI = 77; // F5
     const RMS_THRESHOLD = 0.002;
     const FREQ_EMA_ALPHA = 0.25;
-    const CENTS_EMA_ALPHA = 0.08;
-    const CENTS_AVG_WINDOW = 8;
-    const UI_UPDATE_INTERVAL = 1;
-    const STABILITY_FRAMES_REQUIRED = 3;
-    const LOCK_IN_FRAMES_REQUIRED = 10;
+    const DISPLAY_CENTS_ALPHA = 0.1;
+    const COMMIT_BUFFER_SIZE = 30;
+    const DOMINANCE_THRESHOLD = 0.6;
+    const MIN_LISTEN_WINDOW_MS = 600;
+    const COMMIT_INTERVAL_MS = 500;
+    const AUTO_SCROLL_DEBOUNCE_MS = 500;
     const SILENCE_RESET_MS = 2000;
     const YIN_CONFIDENCE_MIN = 0.15;
 
@@ -291,12 +302,13 @@
     let frameCounter = 0;
     let noPitchFrames = 0;
     let emaFrequency = null;
-    let emaCents = null;
-    let lastNoteLabel = null;
-    let stableNoteFrames = 0;
-    let centsHistory = [];
-    let lastNeedleSign = 1;
+    let displayedCents = 0;
+    let pitchFrames = [];
+    let committedMidi = null;
+    let committedCents = 0;
+    let lastCommitMs = 0;
     let currentActiveMidi = null;
+    let lastAutoScrollMs = 0;
     let silenceStartMs = null;
     let silenceCleared = false;
 
@@ -357,7 +369,7 @@
       currentActiveMidi = null;
     }
 
-    function setKeyHighlight(midi) {
+    function setKeyHighlight(midi, shouldScroll) {
       if (currentActiveMidi === midi) return;
       clearKeyHighlight();
       const key = keyByMidi.get(midi);
@@ -365,7 +377,9 @@
         key.classList.add("active");
         currentActiveKey = key;
         currentActiveMidi = midi;
-        key.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+        if (shouldScroll) {
+          key.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+        }
       }
     }
 
@@ -447,27 +461,14 @@
 
     function resetPitchTracking() {
       emaFrequency = null;
-      emaCents = null;
-      lastNoteLabel = null;
-      stableNoteFrames = 0;
-      centsHistory = [];
-      lastNeedleSign = 1;
+      displayedCents = 0;
+      pitchFrames = [];
+      committedMidi = null;
+      committedCents = 0;
+      lastCommitMs = 0;
     }
 
-    function updateUIForPitch(freq, cents, stableReady) {
-      if (!freq) {
-        // Keep last valid state visible during brief silence.
-        return;
-      }
-
-      const midiFloat = frequencyToMidi(freq);
-      const nearestMidi = Math.round(midiFloat);
-
-      if (!stableReady) {
-        // Keep last valid state visible during unstable tracking.
-        return;
-      }
-
+    function updateUIFromCommittedState(cents) {
       const clamped = Math.max(-30, Math.min(30, cents));
       const leftPercent = ((clamped + 30) / 60) * 100;
       needle.style.left = `${leftPercent}%`;
@@ -488,10 +489,57 @@
         pitchPanel.style.backgroundColor = `rgb(${red}, ${green}, ${blue})`;
       }
 
-      if (nearestMidi >= MIN_MIDI && nearestMidi <= MAX_MIDI) {
-        setKeyHighlight(nearestMidi);
-      } else {
-        clearKeyHighlight();
+    }
+
+    function pushPitchFrame(midi, cents) {
+      pitchFrames.push({ midi, cents, time: performance.now() });
+      if (pitchFrames.length > COMMIT_BUFFER_SIZE) {
+        pitchFrames.shift();
+      }
+    }
+
+    function tryCommitDominantNote(nowMs) {
+      if (nowMs - lastCommitMs < COMMIT_INTERVAL_MS) return;
+      if (pitchFrames.length < Math.floor(COMMIT_BUFFER_SIZE * 0.6)) return;
+      const windowMs = pitchFrames[pitchFrames.length - 1].time - pitchFrames[0].time;
+      if (windowMs < MIN_LISTEN_WINDOW_MS) return;
+
+      const counts = new Map();
+      for (const frame of pitchFrames) {
+        counts.set(frame.midi, (counts.get(frame.midi) ?? 0) + 1);
+      }
+
+      let dominantMidi = null;
+      let dominantCount = 0;
+      for (const [midi, count] of counts) {
+        if (count > dominantCount) {
+          dominantCount = count;
+          dominantMidi = midi;
+        }
+      }
+      if (dominantMidi === null) return;
+
+      const dominance = dominantCount / pitchFrames.length;
+      if (dominance < DOMINANCE_THRESHOLD) return;
+
+      let centsSum = 0;
+      let centsCount = 0;
+      for (const frame of pitchFrames) {
+        if (frame.midi === dominantMidi) {
+          centsSum += frame.cents;
+          centsCount += 1;
+        }
+      }
+      if (!centsCount) return;
+
+      committedMidi = dominantMidi;
+      committedCents = centsSum / centsCount;
+      lastCommitMs = nowMs;
+
+      if (committedMidi >= MIN_MIDI && committedMidi <= MAX_MIDI) {
+        const canScroll = nowMs - lastAutoScrollMs >= AUTO_SCROLL_DEBOUNCE_MS;
+        setKeyHighlight(committedMidi, canScroll);
+        if (canScroll) lastAutoScrollMs = nowMs;
       }
     }
 
@@ -510,48 +558,9 @@
 
         const midiFloat = frequencyToMidi(emaFrequency);
         const nearestMidi = Math.round(midiFloat);
-        const note = midiToNote(nearestMidi);
         const rawCents = centsOff(emaFrequency, nearestMidi);
-        emaCents = emaCents === null
-          ? rawCents
-          : emaCents + CENTS_EMA_ALPHA * (rawCents - emaCents);
-        centsHistory.push(emaCents);
-        if (centsHistory.length > CENTS_AVG_WINDOW) {
-          centsHistory.shift();
-        }
-        const avgCents = centsHistory.reduce((sum, value) => sum + value, 0) / centsHistory.length;
-
-        if (note.label === lastNoteLabel) {
-          stableNoteFrames += 1;
-        } else {
-          lastNoteLabel = note.label;
-          stableNoteFrames = 1;
-        }
-
-        const stableReady = stableNoteFrames >= STABILITY_FRAMES_REQUIRED;
-        const isLockedIn = stableNoteFrames >= LOCK_IN_FRAMES_REQUIRED;
-        if (stableReady && nearestMidi >= MIN_MIDI && nearestMidi <= MAX_MIDI) {
-          setKeyHighlight(nearestMidi);
-        } else {
-          clearKeyHighlight();
-        }
-
-        if (Math.abs(avgCents) >= 0.4) {
-          lastNeedleSign = avgCents >= 0 ? 1 : -1;
-        }
-
-        let displayCents = avgCents;
-        if (!isLockedIn && Math.abs(displayCents) < 1.5) {
-          // Prevent premature perfect-center indication before stable lock-in.
-          displayCents = 1.5 * lastNeedleSign;
-        }
-        if (isLockedIn && Math.abs(displayCents) <= 0.8) {
-          displayCents = 0;
-        }
-
-        if (frameCounter % UI_UPDATE_INTERVAL === 0) {
-          updateUIForPitch(emaFrequency, displayCents, stableReady);
-        }
+        pushPitchFrame(nearestMidi, rawCents);
+        tryCommitDominantNote(performance.now());
       } else {
         noPitchFrames += 1;
         if (silenceStartMs === null) {
@@ -565,10 +574,11 @@
           clearKeyHighlight();
           silenceCleared = true;
         }
-        if (frameCounter % UI_UPDATE_INTERVAL === 0) {
-          const stableReady = stableNoteFrames >= STABILITY_FRAMES_REQUIRED;
-          updateUIForPitch(emaFrequency, emaCents ?? 0, stableReady);
-        }
+      }
+
+      if (committedMidi !== null) {
+        displayedCents += DISPLAY_CENTS_ALPHA * (committedCents - displayedCents);
+        updateUIFromCommittedState(displayedCents);
       }
 
       animationId = requestAnimationFrame(analyse);
