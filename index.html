@@ -130,6 +130,80 @@
       box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
     }
 
+    .needle.locked {
+      box-shadow:
+        0 0 12px 4px rgba(180, 255, 180, 0.7),
+        0 0 24px 8px rgba(100, 255, 100, 0.3);
+      animation: pulse 1s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.75; }
+    }
+
+    .cents-indicator {
+      position: absolute;
+      right: 10px;
+      bottom: 8px;
+      font-size: 13px;
+      color: #fff;
+      opacity: 0.7;
+      pointer-events: none;
+      display: none;
+    }
+
+    .history-toolbar {
+      margin: 8px 0 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .history-select {
+      background: var(--surface-2);
+      color: var(--text);
+      border: 1px solid #35405a;
+      border-radius: 8px;
+      padding: 6px 8px;
+      font-size: 0.85rem;
+    }
+
+    .history-row {
+      display: none;
+      gap: 6px;
+      justify-content: flex-end;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      padding-bottom: 6px;
+      margin-bottom: 10px;
+    }
+
+    .history-row.show {
+      display: flex;
+    }
+
+    .history-pill {
+      border-radius: 999px;
+      padding: 4px 9px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #fff;
+      white-space: nowrap;
+    }
+
+    .history-pill.in-tune {
+      background: #3da84a;
+    }
+
+    .history-pill.flat {
+      background: #2f6ea2;
+    }
+
+    .history-pill.sharp {
+      background: #c57a2a;
+    }
+
     .keyboard-frame {
       background: #12151d;
       border: 1px solid #2a3040;
@@ -198,13 +272,6 @@
       border-color: #ff7171;
     }
 
-    .status {
-      margin-top: 12px;
-      color: var(--muted);
-      font-size: 0.9rem;
-      min-height: 1.2rem;
-    }
-
     @media (max-height: 500px) and (orientation: landscape) {
       :root {
         --white-key-height: 120px;
@@ -242,9 +309,8 @@
         padding: 8px;
       }
 
-      .status {
-        margin-top: 6px;
-        font-size: 0.78rem;
+      .history-toolbar {
+        margin: 6px 0 8px;
       }
     }
 
@@ -259,13 +325,24 @@
     <section class="pitch-panel" id="pitchPanel">
       <div class="center-marker"></div>
       <div class="needle" id="needle" style="left: 50%;"></div>
+      <div class="cents-indicator" id="centsIndicator">+0¢</div>
     </section>
+
+    <div class="history-toolbar">
+      <button id="historyToggleBtn" type="button">History ON</button>
+      <select id="historyLimitSelect" class="history-select" aria-label="History note count">
+        <option value="3">3</option>
+        <option value="5">5</option>
+        <option value="8" selected>8</option>
+        <option value="10">10</option>
+      </select>
+    </div>
+    <div class="history-row show" id="historyRow"></div>
 
     <section class="keyboard-frame">
       <div class="keyboard-viewport">
         <div class="keyboard" id="keyboard"></div>
       </div>
-      <div class="status" id="statusText">Microphone not started.</div>
     </section>
   </main>
 
@@ -288,14 +365,18 @@
 
     const keyboardEl = document.getElementById("keyboard");
     const startBtn = document.getElementById("startBtn");
-    const statusText = document.getElementById("statusText");
     const pitchPanel = document.getElementById("pitchPanel");
     const needle = document.getElementById("needle");
+    const centsIndicator = document.getElementById("centsIndicator");
+    const historyToggleBtn = document.getElementById("historyToggleBtn");
+    const historyLimitSelect = document.getElementById("historyLimitSelect");
+    const historyRow = document.getElementById("historyRow");
 
     let audioContext;
     let analyser;
     let buffer;
     let highPassFilter;
+    let micStream;
     let currentActiveKey = null;
     let animationId = null;
     let zoom = 1;
@@ -311,6 +392,13 @@
     let lastAutoScrollMs = 0;
     let silenceStartMs = null;
     let silenceCleared = false;
+    let toneContext = null;
+    let toneOscillator = null;
+    let toneGain = null;
+    let toneStopTimer = null;
+    let historyEnabled = true;
+    let historyLimit = 8;
+    let noteHistory = [];
 
     const keyByMidi = new Map();
     buildKeyboard();
@@ -356,9 +444,73 @@
           key.style.left = `calc((${left} + 1) * var(--white-key-width) * var(--zoom) - (var(--black-key-width) * var(--zoom) / 2))`;
         }
 
+        key.addEventListener("pointerdown", async () => {
+          await playReferenceToneForMidi(midi);
+        });
+
         keyboardEl.appendChild(key);
         keyByMidi.set(midi, key);
       }
+    }
+
+    async function getToneAudioContext() {
+      if (audioContext) return audioContext;
+      if (!toneContext || toneContext.state === "closed") {
+        toneContext = new AudioContextClass();
+      }
+      if (toneContext.state === "suspended") {
+        await toneContext.resume();
+      }
+      return toneContext;
+    }
+
+    function stopReferenceTone() {
+      if (toneStopTimer) {
+        clearTimeout(toneStopTimer);
+        toneStopTimer = null;
+      }
+      if (toneOscillator) {
+        try {
+          toneOscillator.stop();
+        } catch (_) {
+          // Oscillator may already be stopped.
+        }
+        toneOscillator.disconnect();
+        toneOscillator = null;
+      }
+      if (toneGain) {
+        toneGain.disconnect();
+        toneGain = null;
+      }
+    }
+
+    async function playReferenceToneForMidi(midi) {
+      if (!AudioContextClass) return;
+      const ctx = await getToneAudioContext();
+      stopReferenceTone();
+
+      const now = ctx.currentTime;
+      const frequency = midiToFrequency(midi);
+      const gainNode = ctx.createGain();
+      const osc = ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(frequency, now);
+
+      gainNode.gain.setValueAtTime(0.0001, now);
+      gainNode.gain.linearRampToValueAtTime(0.22, now + 0.01);
+      gainNode.gain.setValueAtTime(0.22, now + 1.2);
+      gainNode.gain.linearRampToValueAtTime(0.0001, now + 1.5);
+
+      osc.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 1.5);
+
+      toneOscillator = osc;
+      toneGain = gainNode;
+      toneStopTimer = setTimeout(() => {
+        stopReferenceTone();
+      }, 1650);
     }
 
     function clearKeyHighlight() {
@@ -466,6 +618,8 @@
       committedMidi = null;
       committedCents = 0;
       lastCommitMs = 0;
+      centsIndicator.style.display = "none";
+      needle.classList.remove("locked");
     }
 
     function updateUIFromCommittedState(cents) {
@@ -489,6 +643,45 @@
         pitchPanel.style.backgroundColor = `rgb(${red}, ${green}, ${blue})`;
       }
 
+      if (Math.abs(cents) <= 10) {
+        needle.classList.add("locked");
+      } else {
+        needle.classList.remove("locked");
+      }
+
+      if (Math.abs(cents) > 5 && committedMidi !== null) {
+        const rounded = Math.round(cents);
+        const sign = rounded > 0 ? "+" : "";
+        centsIndicator.textContent = `${sign}${rounded}¢`;
+        centsIndicator.style.display = "block";
+      } else {
+        centsIndicator.style.display = "none";
+      }
+
+    }
+
+    function getHistoryClass(cents) {
+      if (Math.abs(cents) <= 10) return "in-tune";
+      if (cents < 0) return "flat";
+      return "sharp";
+    }
+
+    function renderHistory() {
+      historyRow.innerHTML = "";
+      if (!historyEnabled) {
+        historyRow.classList.remove("show");
+        historyToggleBtn.textContent = "History OFF";
+        return;
+      }
+
+      historyToggleBtn.textContent = "History ON";
+      historyRow.classList.add("show");
+      for (const entry of noteHistory) {
+        const pill = document.createElement("div");
+        pill.className = `history-pill ${getHistoryClass(entry.cents)}`;
+        pill.textContent = entry.label;
+        historyRow.appendChild(pill);
+      }
     }
 
     function pushPitchFrame(midi, cents) {
@@ -548,6 +741,15 @@
         setKeyHighlight(committedMidi, canScroll);
         if (canScroll) lastAutoScrollMs = nowMs;
       }
+
+      if (previousCommittedMidi !== committedMidi) {
+        const note = midiToNote(committedMidi);
+        noteHistory.push({ label: note.label, cents: committedCents });
+        if (noteHistory.length > historyLimit) {
+          noteHistory = noteHistory.slice(noteHistory.length - historyLimit);
+        }
+        renderHistory();
+      }
     }
 
     function analyse() {
@@ -579,6 +781,8 @@
           pitchPanel.style.backgroundColor = "#24322a";
           needle.style.left = "50%";
           clearKeyHighlight();
+          centsIndicator.style.display = "none";
+          needle.classList.remove("locked");
           silenceCleared = true;
         }
       }
@@ -591,15 +795,51 @@
       animationId = requestAnimationFrame(analyse);
     }
 
+    function resetAppUI() {
+      pitchPanel.style.backgroundColor = "#24322a";
+      needle.style.left = "50%";
+      centsIndicator.style.display = "none";
+      needle.classList.remove("locked");
+      clearKeyHighlight();
+    }
+
+    async function stopMicrophone() {
+      if (animationId) {
+        cancelAnimationFrame(animationId);
+        animationId = null;
+      }
+      stopReferenceTone();
+      if (micStream) {
+        for (const track of micStream.getTracks()) {
+          track.stop();
+        }
+        micStream = null;
+      }
+      if (audioContext && audioContext.state !== "closed") {
+        await audioContext.close();
+      }
+      audioContext = null;
+      analyser = null;
+      buffer = null;
+      highPassFilter = null;
+      frameCounter = 0;
+      noPitchFrames = 0;
+      silenceStartMs = null;
+      silenceCleared = false;
+      noteHistory = [];
+      renderHistory();
+      resetPitchTracking();
+      resetAppUI();
+      startBtn.textContent = "Start microphone";
+    }
+
     async function startMicrophone() {
       try {
         if (audioContext) return;
         if (!AudioContextClass) {
-          statusText.textContent = "Web Audio not supported on this browser.";
           return;
         }
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          statusText.textContent = "Microphone API not available on this browser.";
           return;
         }
 
@@ -609,11 +849,8 @@
           await audioContext.resume();
         }
 
-        if (!window.isSecureContext) {
-          statusText.textContent = "Mic blocked: use HTTPS (or localhost) on iPhone/Safari.";
-        }
-
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        micStream = stream;
 
         const source = audioContext.createMediaStreamSource(stream);
         highPassFilter = audioContext.createBiquadFilter();
@@ -628,35 +865,47 @@
 
         source.connect(highPassFilter);
         highPassFilter.connect(analyser);
-        statusText.textContent = "Listening... sing or hum a steady note.";
-        startBtn.disabled = true;
+        startBtn.textContent = "Stop microphone";
         analyse();
       } catch (err) {
         if (audioContext && audioContext.state !== "closed") {
           await audioContext.close();
         }
-        if (audioContext && audioContext.state === "closed") {
-          audioContext = null;
-        }
-        const blockedByContext = !window.isSecureContext;
-        if (blockedByContext) {
-          statusText.textContent = "Mic blocked by insecure context. Open via HTTPS.";
-        } else if (err && (err.name === "NotAllowedError" || err.name === "SecurityError")) {
-          statusText.textContent = "Microphone permission denied. Allow mic access in Safari.";
-        } else {
-          statusText.textContent = "Microphone unavailable on this device/browser.";
-        }
+        audioContext = null;
+        micStream = null;
         console.error(err);
       }
     }
 
-    startBtn.addEventListener("click", startMicrophone);
+    startBtn.addEventListener("click", async () => {
+      if (audioContext) {
+        await stopMicrophone();
+      } else {
+        await startMicrophone();
+      }
+    });
+
+    historyToggleBtn.addEventListener("click", () => {
+      historyEnabled = !historyEnabled;
+      renderHistory();
+    });
+
+    historyLimitSelect.addEventListener("change", () => {
+      historyLimit = Number(historyLimitSelect.value);
+      if (noteHistory.length > historyLimit) {
+        noteHistory = noteHistory.slice(noteHistory.length - historyLimit);
+      }
+      renderHistory();
+    });
 
     window.addEventListener("beforeunload", () => {
       if (animationId) cancelAnimationFrame(animationId);
+      stopReferenceTone();
       if (audioContext) audioContext.close();
+      if (toneContext && toneContext !== audioContext) toneContext.close();
     });
 
+    renderHistory();
     document.documentElement.style.setProperty("--zoom", zoom.toFixed(2));
   </script>
 </body>
