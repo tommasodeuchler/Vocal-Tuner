@@ -134,7 +134,7 @@
       border-radius: 3px;
       background: #ffffff;
       transform: translateX(-50%);
-      transition: left 0.25s ease-out;
+      transition: left 0.25s ease-out, opacity 0.1s ease-in;
       box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
     }
 
@@ -749,6 +749,7 @@
       frameCounter += 1;
 
       if (detection) {
+        needle.style.opacity = "1";
         noPitchFrames = 0;
         silenceStartMs = null;
         silenceCleared = false;
@@ -762,6 +763,7 @@
         pushPitchFrame(nearestMidi, rawCents);
         tryCommitDominantNote(performance.now());
       } else {
+        needle.style.opacity = "0";
         noPitchFrames += 1;
         if (silenceStartMs === null) {
           silenceStartMs = performance.now();
@@ -771,6 +773,7 @@
           resetPitchTracking();
           pitchPanel.style.backgroundColor = "#24322a";
           needle.style.left = "50%";
+          needle.style.opacity = "1";
           clearKeyHighlight();
           centsIndicator.style.display = "none";
           needle.classList.remove("locked");
@@ -778,7 +781,7 @@
         }
       }
 
-      if (committedMidi !== null) {
+      if (detection && committedMidi !== null) {
         displayedCents += DISPLAY_CENTS_ALPHA * (committedCents - displayedCents);
         updateUIFromCommittedState(displayedCents);
       }
@@ -789,6 +792,7 @@
     function resetAppUI() {
       pitchPanel.style.backgroundColor = "#24322a";
       needle.style.left = "50%";
+      needle.style.opacity = "1";
       centsIndicator.style.display = "none";
       needle.classList.remove("locked");
       clearKeyHighlight();
