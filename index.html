@@ -69,6 +69,14 @@
       align-items: center;
       justify-content: flex-start;
       margin-bottom: 16px;
+      gap: 8px;
+    }
+
+    .top-controls {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
 
     button {
@@ -153,13 +161,6 @@
       display: none;
     }
 
-    .history-toolbar {
-      margin: 8px 0 10px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
     .history-select {
       background: var(--surface-2);
       color: var(--text);
@@ -169,39 +170,24 @@
       font-size: 0.85rem;
     }
 
-    .history-row {
-      display: none;
-      gap: 6px;
-      justify-content: flex-end;
-      flex-wrap: nowrap;
-      overflow-x: auto;
-      padding-bottom: 6px;
-      margin-bottom: 10px;
+    .history-dot {
+      position: absolute;
+      top: 6px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 3;
     }
 
-    .history-row.show {
-      display: flex;
+    .white-key .history-dot {
+      background: #000;
     }
 
-    .history-pill {
-      border-radius: 999px;
-      padding: 4px 9px;
-      font-size: 12px;
-      font-weight: 700;
-      color: #fff;
-      white-space: nowrap;
-    }
-
-    .history-pill.in-tune {
-      background: #3da84a;
-    }
-
-    .history-pill.flat {
-      background: #2f6ea2;
-    }
-
-    .history-pill.sharp {
-      background: #c57a2a;
+    .black-key .history-dot {
+      background: #fff;
     }
 
     .keyboard-frame {
@@ -309,8 +295,8 @@
         padding: 8px;
       }
 
-      .history-toolbar {
-        margin: 6px 0 8px;
+      .top {
+        margin-bottom: 6px;
       }
     }
 
@@ -320,6 +306,15 @@
   <main class="app">
     <div class="top">
       <button id="startBtn">Start microphone</button>
+      <div class="top-controls">
+        <button id="historyToggleBtn" type="button">History ON</button>
+        <select id="historyLimitSelect" class="history-select" aria-label="History note count">
+          <option value="3">3</option>
+          <option value="5">5</option>
+          <option value="8" selected>8</option>
+          <option value="10">10</option>
+        </select>
+      </div>
     </div>
 
     <section class="pitch-panel" id="pitchPanel">
@@ -327,17 +322,6 @@
       <div class="needle" id="needle" style="left: 50%;"></div>
       <div class="cents-indicator" id="centsIndicator">+0¢</div>
     </section>
-
-    <div class="history-toolbar">
-      <button id="historyToggleBtn" type="button">History ON</button>
-      <select id="historyLimitSelect" class="history-select" aria-label="History note count">
-        <option value="3">3</option>
-        <option value="5">5</option>
-        <option value="8" selected>8</option>
-        <option value="10">10</option>
-      </select>
-    </div>
-    <div class="history-row show" id="historyRow"></div>
 
     <section class="keyboard-frame">
       <div class="keyboard-viewport">
@@ -370,7 +354,6 @@
     const centsIndicator = document.getElementById("centsIndicator");
     const historyToggleBtn = document.getElementById("historyToggleBtn");
     const historyLimitSelect = document.getElementById("historyLimitSelect");
-    const historyRow = document.getElementById("historyRow");
 
     let audioContext;
     let analyser;
@@ -660,27 +643,27 @@
 
     }
 
-    function getHistoryClass(cents) {
-      if (Math.abs(cents) <= 10) return "in-tune";
-      if (cents < 0) return "flat";
-      return "sharp";
+    function clearHistoryDots() {
+      for (const key of keyByMidi.values()) {
+        const dot = key.querySelector(".history-dot");
+        if (dot) dot.remove();
+      }
     }
 
-    function renderHistory() {
-      historyRow.innerHTML = "";
+    function renderHistoryDots() {
+      clearHistoryDots();
       if (!historyEnabled) {
-        historyRow.classList.remove("show");
         historyToggleBtn.textContent = "History OFF";
         return;
       }
 
       historyToggleBtn.textContent = "History ON";
-      historyRow.classList.add("show");
-      for (const entry of noteHistory) {
-        const pill = document.createElement("div");
-        pill.className = `history-pill ${getHistoryClass(entry.cents)}`;
-        pill.textContent = entry.label;
-        historyRow.appendChild(pill);
+      for (const midi of noteHistory) {
+        const key = keyByMidi.get(midi);
+        if (!key) continue;
+        const dot = document.createElement("div");
+        dot.className = "history-dot";
+        key.appendChild(dot);
       }
     }
 
@@ -742,13 +725,13 @@
         if (canScroll) lastAutoScrollMs = nowMs;
       }
 
-      if (previousCommittedMidi !== committedMidi) {
-        const note = midiToNote(committedMidi);
-        noteHistory.push({ label: note.label, cents: committedCents });
+      if (historyEnabled && previousCommittedMidi !== committedMidi) {
+        noteHistory = noteHistory.filter((midi) => midi !== committedMidi);
+        noteHistory.push(committedMidi);
         if (noteHistory.length > historyLimit) {
           noteHistory = noteHistory.slice(noteHistory.length - historyLimit);
         }
-        renderHistory();
+        renderHistoryDots();
       }
     }
 
@@ -827,7 +810,7 @@
       silenceStartMs = null;
       silenceCleared = false;
       noteHistory = [];
-      renderHistory();
+      clearHistoryDots();
       resetPitchTracking();
       resetAppUI();
       startBtn.textContent = "Start microphone";
@@ -887,7 +870,10 @@
 
     historyToggleBtn.addEventListener("click", () => {
       historyEnabled = !historyEnabled;
-      renderHistory();
+      if (!historyEnabled) {
+        noteHistory = [];
+      }
+      renderHistoryDots();
     });
 
     historyLimitSelect.addEventListener("change", () => {
@@ -895,7 +881,7 @@
       if (noteHistory.length > historyLimit) {
         noteHistory = noteHistory.slice(noteHistory.length - historyLimit);
       }
-      renderHistory();
+      renderHistoryDots();
     });
 
     window.addEventListener("beforeunload", () => {
@@ -905,7 +891,7 @@
       if (toneContext && toneContext !== audioContext) toneContext.close();
     });
 
-    renderHistory();
+    renderHistoryDots();
     document.documentElement.style.setProperty("--zoom", zoom.toFixed(2));
   </script>
 </body>
