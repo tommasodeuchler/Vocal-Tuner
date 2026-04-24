@@ -277,11 +277,11 @@
     const MAX_MIDI = 77; // F5
     const RMS_THRESHOLD = 0.002;
     const FREQ_EMA_ALPHA = 0.25;
-    const DISPLAY_CENTS_ALPHA = 0.1;
+    const DISPLAY_CENTS_ALPHA = 0.05;
     const COMMIT_BUFFER_SIZE = 30;
-    const DOMINANCE_THRESHOLD = 0.6;
+    const DOMINANCE_THRESHOLD = 0.5;
     const MIN_LISTEN_WINDOW_MS = 600;
-    const COMMIT_INTERVAL_MS = 500;
+    const COMMIT_INTERVAL_MS = 300;
     const AUTO_SCROLL_DEBOUNCE_MS = 500;
     const SILENCE_RESET_MS = 2000;
     const YIN_CONFIDENCE_MIN = 0.15;
@@ -532,9 +532,16 @@
       }
       if (!centsCount) return;
 
+      const previousCommittedMidi = committedMidi;
       committedMidi = dominantMidi;
       committedCents = centsSum / centsCount;
       lastCommitMs = nowMs;
+
+      if (previousCommittedMidi !== null && previousCommittedMidi !== committedMidi) {
+        // New note detected: center needle immediately, then drift to target cents.
+        displayedCents = 0;
+        updateUIFromCommittedState(0);
+      }
 
       if (committedMidi >= MIN_MIDI && committedMidi <= MAX_MIDI) {
         const canScroll = nowMs - lastAutoScrollMs >= AUTO_SCROLL_DEBOUNCE_MS;
