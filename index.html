@@ -606,23 +606,31 @@
     }
 
     function updateUIFromCommittedState(cents) {
-      const clamped = Math.max(-30, Math.min(30, cents));
-      const leftPercent = ((clamped + 30) / 60) * 100;
+      let leftPercent = 50;
+      const absCents = Math.abs(cents);
+
+      // Needle deadzone: stay perfectly centered within +/-5 cents.
+      if (absCents > 5) {
+        const sign = cents > 0 ? 1 : -1;
+        const scaled = Math.min(1, (absCents - 5) / 20); // 5..25 cents -> 0..1
+        leftPercent = sign > 0
+          ? 50 + scaled * 50
+          : 50 - scaled * 50;
+      }
+
       needle.style.left = `${leftPercent}%`;
 
-      if (Math.abs(cents) <= 15) {
-        pitchPanel.style.backgroundColor = "#3da84a";
-      } else if (cents < 0) {
-        const ratio = Math.min(1, (Math.abs(cents) - 15) / 15);
-        const red = Math.round(158 + ratio * 67);
-        const green = Math.round(82 - ratio * 36);
-        const blue = Math.round(82 - ratio * 36);
-        pitchPanel.style.backgroundColor = `rgb(${red}, ${green}, ${blue})`;
+      const clampedAbs = Math.min(25, absCents);
+      if (clampedAbs <= 10) {
+        pitchPanel.style.backgroundColor = "#27ae60";
+      } else if (clampedAbs >= 25) {
+        pitchPanel.style.backgroundColor = "#c0392b";
       } else {
-        const ratio = Math.min(1, (cents - 15) / 15);
-        const red = Math.round(180 + ratio * 34);
-        const green = Math.round(92 - ratio * 36);
-        const blue = Math.round(60 - ratio * 22);
+        const ratio = (clampedAbs - 10) / 15; // 10..25 cents -> 0..1
+        // Blend from yellow (#f1c40f) to red (#c0392b)
+        const red = Math.round(241 + ratio * (192 - 241));
+        const green = Math.round(196 + ratio * (57 - 196));
+        const blue = Math.round(15 + ratio * (43 - 15));
         pitchPanel.style.backgroundColor = `rgb(${red}, ${green}, ${blue})`;
       }
 
