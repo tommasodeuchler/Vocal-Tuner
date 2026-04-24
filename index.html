@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Voice Pitch Keyboard</title>
+  <style>
+    :root {
+      --bg: #101217;
+      --surface: #181b22;
+      --surface-2: #1f2430;
+      --text: #f1f3f8;
+      --muted: #a3acbf;
+      --accent-red: #ff1212;
+      --in-tune: #98ff12;
+      --flat: #12a0ff;
+      --sharp: #f24216;
+      --key-border: #2d3343;
+      --white-key: #f4f7ff;
+      --black-key: #0a0d14;
+      --keyboard-width: 100%;
+      --white-key-width: 50px;
+      --white-key-height: 230px;
+      --black-key-width: 30px;
+      --black-key-height: 140px;
+      --zoom: 1;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(circle at top, #1d2230, var(--bg) 55%);
+      color: var(--text);
+      font-family: Inter, Segoe UI, Roboto, Arial, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .app {
+      width: min(1200px, 100%);
+      background: rgba(24, 27, 34, 0.9);
+      border: 1px solid #2a3040;
+      border-radius: 16px;
+      padding: 20px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+    }
+
+    .top {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      margin-bottom: 16px;
+    }
+
+    button {
+      background: var(--surface-2);
+      color: var(--text);
+      border: 1px solid #35405a;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: transform 0.08s ease, border-color 0.2s ease;
+    }
+
+    button:hover:not(:disabled) {
+      border-color: #4e5d82;
+    }
+
+    button:active:not(:disabled) {
+      transform: translateY(1px);
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+
+    .pitch-panel {
+      width: 100%;
+      height: 180px;
+      border-radius: 14px;
+      border: 1px solid #2a3040;
+      background: #24322a;
+      position: relative;
+      margin-bottom: 14px;
+      transition: background-color 0.15s ease;
+      overflow: hidden;
+    }
+
+    .center-marker {
+      position: absolute;
+      left: 50%;
+      top: 0;
+      width: 2px;
+      height: 100%;
+      transform: translateX(-50%);
+      background: rgba(255, 255, 255, 0.4);
+      pointer-events: none;
+    }
+
+    .needle {
+      position: absolute;
+      top: 50%;
+      width: 6px;
+      height: 140px;
+      border-radius: 3px;
+      background: #ffffff;
+      transform: translateX(-50%);
+      transition: left 0.25s ease-out;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+    }
+
+    .keyboard-frame {
+      background: #12151d;
+      border: 1px solid #2a3040;
+      border-radius: 12px;
+      padding: 14px;
+      overflow: hidden;
+    }
+
+    .keyboard-viewport {
+      width: 100%;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .keyboard {
+      position: relative;
+      height: calc(var(--white-key-height) * var(--zoom));
+      width: calc(22 * var(--white-key-width) * var(--zoom));
+      margin: 0 auto;
+      transform-origin: top left;
+      user-select: none;
+    }
+
+    .white-key {
+      position: absolute;
+      bottom: 0;
+      width: calc(var(--white-key-width) * var(--zoom));
+      height: calc(var(--white-key-height) * var(--zoom));
+      background: var(--white-key);
+      border: 1px solid var(--key-border);
+      border-radius: 0 0 8px 8px;
+      z-index: 1;
+      display: flex;
+      justify-content: center;
+      align-items: flex-end;
+      padding-bottom: 9px;
+      color: #333a4a;
+      font-size: 0.7rem;
+      font-weight: 700;
+    }
+
+    .black-key {
+      position: absolute;
+      top: 0;
+      width: calc(var(--black-key-width) * var(--zoom));
+      height: calc(var(--black-key-height) * var(--zoom));
+      background: var(--black-key);
+      border: 1px solid #000;
+      border-radius: 0 0 6px 6px;
+      z-index: 2;
+      color: #b9c1d5;
+      font-size: 0.63rem;
+      display: flex;
+      justify-content: center;
+      align-items: flex-end;
+      padding-bottom: 8px;
+      font-weight: 700;
+    }
+
+    .white-key.active,
+    .black-key.active {
+      background: var(--accent-red);
+      color: #ffffff;
+      border-color: #ff7171;
+    }
+
+    .status {
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 0.9rem;
+      min-height: 1.2rem;
+    }
+
+  </style>
+</head>
+<body>
+  <main class="app">
+    <div class="top">
+      <button id="startBtn">Start microphone</button>
+    </div>
+
+    <section class="pitch-panel" id="pitchPanel">
+      <div class="center-marker"></div>
+      <div class="needle" id="needle" style="left: 50%;"></div>
+    </section>
+
+    <section class="keyboard-frame">
+      <div class="keyboard-viewport">
+        <div class="keyboard" id="keyboard"></div>
+      </div>
+      <div class="status" id="statusText">Microphone not started.</div>
+    </section>
+  </main>
+
+  <script>
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+    const WHITE_NOTES = new Set(["C", "D", "E", "F", "G", "A", "B"]);
+    const MIN_MIDI = 41; // F2
+    const MAX_MIDI = 77; // F5
+    const RMS_THRESHOLD = 0.002;
+    const FREQ_EMA_ALPHA = 0.25;
+    const CENTS_EMA_ALPHA = 0.08;
+    const CENTS_AVG_WINDOW = 8;
+    const UI_UPDATE_INTERVAL = 4;
+    const STABILITY_FRAMES_REQUIRED = 3;
+    const LOCK_IN_FRAMES_REQUIRED = 10;
+    const SILENCE_RESET_MS = 2000;
+    const YIN_CONFIDENCE_MIN = 0.15;
+
+    const keyboardEl = document.getElementById("keyboard");
+    const startBtn = document.getElementById("startBtn");
+    const statusText = document.getElementById("statusText");
+    const pitchPanel = document.getElementById("pitchPanel");
+    const needle = document.getElementById("needle");
+
+    let audioContext;
+    let analyser;
+    let buffer;
+    let highPassFilter;
+    let currentActiveKey = null;
+    let animationId = null;
+    let zoom = 1;
+    let frameCounter = 0;
+    let noPitchFrames = 0;
+    let emaFrequency = null;
+    let emaCents = null;
+    let lastNoteLabel = null;
+    let stableNoteFrames = 0;
+    let centsHistory = [];
+    let lastNeedleSign = 1;
+    let silenceStartMs = null;
+    let silenceCleared = false;
+
+    const keyByMidi = new Map();
+    buildKeyboard();
+
+    function midiToNote(midi) {
+      const name = NOTE_NAMES[midi % 12];
+      const octave = Math.floor(midi / 12) - 1;
+      return { name, octave, label: `${name}${octave}` };
+    }
+
+    function frequencyToMidi(freq) {
+      return 69 + 12 * Math.log2(freq / 440);
+    }
+
+    function midiToFrequency(midi) {
+      return 440 * Math.pow(2, (midi - 69) / 12);
+    }
+
+    function centsOff(freq, nearestMidi) {
+      const refFreq = midiToFrequency(nearestMidi);
+      return 1200 * Math.log2(freq / refFreq);
+    }
+
+    function buildKeyboard() {
+      keyboardEl.innerHTML = "";
+      keyByMidi.clear();
+
+      let whiteIndex = 0;
+      for (let midi = MIN_MIDI; midi <= MAX_MIDI; midi++) {
+        const { name, label } = midiToNote(midi);
+        const isWhite = WHITE_NOTES.has(name);
+        const key = document.createElement("div");
+        key.dataset.midi = String(midi);
+        key.textContent = label;
+
+        if (isWhite) {
+          key.className = "white-key";
+          key.style.left = `calc(${whiteIndex} * var(--white-key-width) * var(--zoom))`;
+          whiteIndex += 1;
+        } else {
+          key.className = "black-key";
+          const left = whiteIndex - 1;
+          key.style.left = `calc((${left} + 1) * var(--white-key-width) * var(--zoom) - (var(--black-key-width) * var(--zoom) / 2))`;
+        }
+
+        keyboardEl.appendChild(key);
+        keyByMidi.set(midi, key);
+      }
+    }
+
+    function clearKeyHighlight() {
+      if (currentActiveKey) {
+        currentActiveKey.classList.remove("active");
+        currentActiveKey = null;
+      }
+    }
+
+    function setKeyHighlight(midi) {
+      clearKeyHighlight();
+      const key = keyByMidi.get(midi);
+      if (key) {
+        key.classList.add("active");
+        currentActiveKey = key;
+      }
+    }
+
+    function detectPitchYIN(samples, sampleRate) {
+      let rms = 0;
+      const size = samples.length;
+      for (let i = 0; i < size; i++) {
+        const v = samples[i];
+        rms += v * v;
+      }
+      rms = Math.sqrt(rms / size);
+      if (rms < RMS_THRESHOLD) return null;
+
+      const yinSize = Math.floor(size / 2);
+      const yinBuffer = new Float32Array(yinSize);
+      yinBuffer[0] = 1;
+
+      for (let tau = 1; tau < yinSize; tau++) {
+        let sum = 0;
+        for (let i = 0; i < yinSize; i++) {
+          const delta = samples[i] - samples[i + tau];
+          sum += delta * delta;
+        }
+        yinBuffer[tau] = sum;
+      }
+
+      let runningSum = 0;
+      for (let tau = 1; tau < yinSize; tau++) {
+        runningSum += yinBuffer[tau];
+        if (runningSum === 0) {
+          yinBuffer[tau] = 1;
+        } else {
+          yinBuffer[tau] = (yinBuffer[tau] * tau) / runningSum;
+        }
+      }
+
+      let tauEstimate = -1;
+      const threshold = 0.85;
+      for (let tau = 2; tau < yinSize - 1; tau++) {
+        if (yinBuffer[tau] < threshold && yinBuffer[tau] < yinBuffer[tau - 1]) {
+          while (tau + 1 < yinSize && yinBuffer[tau + 1] < yinBuffer[tau]) {
+            tau += 1;
+          }
+          tauEstimate = tau;
+          break;
+        }
+      }
+
+      if (tauEstimate === -1) {
+        // Fallback to the global minimum so we still return a useful pitch in noisy conditions.
+        let minPos = 2;
+        let minVal = yinBuffer[minPos];
+        for (let tau = 3; tau < yinSize; tau++) {
+          if (yinBuffer[tau] < minVal) {
+            minVal = yinBuffer[tau];
+            minPos = tau;
+          }
+        }
+        tauEstimate = minPos;
+      }
+
+      const x1 = yinBuffer[tauEstimate - 1] ?? yinBuffer[tauEstimate];
+      const x2 = yinBuffer[tauEstimate];
+      const x3 = yinBuffer[tauEstimate + 1] ?? yinBuffer[tauEstimate];
+      const a = (x1 + x3 - 2 * x2) / 2;
+      const b = (x3 - x1) / 2;
+      const shift = a ? -b / (2 * a) : 0;
+      const period = tauEstimate + shift;
+      if (!isFinite(period) || period <= 0) return null;
+
+      const frequency = sampleRate / period;
+      if (frequency < 80 || frequency > 1100) return null;
+
+      const confidence = 1 - Math.min(1, yinBuffer[tauEstimate]);
+      if (confidence < YIN_CONFIDENCE_MIN) return null;
+
+      return { frequency, confidence };
+    }
+
+    function resetPitchTracking() {
+      emaFrequency = null;
+      emaCents = null;
+      lastNoteLabel = null;
+      stableNoteFrames = 0;
+      centsHistory = [];
+      lastNeedleSign = 1;
+    }
+
+    function updateUIForPitch(freq, cents, stableReady) {
+      if (!freq) {
+        // Keep last valid state visible during brief silence.
+        return;
+      }
+
+      const midiFloat = frequencyToMidi(freq);
+      const nearestMidi = Math.round(midiFloat);
+
+      if (!stableReady) {
+        // Keep last valid state visible during unstable tracking.
+        return;
+      }
+
+      const clamped = Math.max(-30, Math.min(30, cents));
+      const leftPercent = ((clamped + 30) / 60) * 100;
+      needle.style.left = `${leftPercent}%`;
+
+      if (Math.abs(cents) <= 15) {
+        pitchPanel.style.backgroundColor = "#3da84a";
+      } else if (cents < 0) {
+        const ratio = Math.min(1, (Math.abs(cents) - 15) / 15);
+        const red = Math.round(158 + ratio * 67);
+        const green = Math.round(82 - ratio * 36);
+        const blue = Math.round(82 - ratio * 36);
+        pitchPanel.style.backgroundColor = `rgb(${red}, ${green}, ${blue})`;
+      } else {
+        const ratio = Math.min(1, (cents - 15) / 15);
+        const red = Math.round(180 + ratio * 34);
+        const green = Math.round(92 - ratio * 36);
+        const blue = Math.round(60 - ratio * 22);
+        pitchPanel.style.backgroundColor = `rgb(${red}, ${green}, ${blue})`;
+      }
+
+      if (nearestMidi >= MIN_MIDI && nearestMidi <= MAX_MIDI) {
+        setKeyHighlight(nearestMidi);
+      } else {
+        clearKeyHighlight();
+      }
+    }
+
+    function analyse() {
+      analyser.getFloatTimeDomainData(buffer);
+      const detection = detectPitchYIN(buffer, audioContext.sampleRate);
+      frameCounter += 1;
+
+      if (detection) {
+        noPitchFrames = 0;
+        silenceStartMs = null;
+        silenceCleared = false;
+        emaFrequency = emaFrequency === null
+          ? detection.frequency
+          : emaFrequency + FREQ_EMA_ALPHA * (detection.frequency - emaFrequency);
+
+        const midiFloat = frequencyToMidi(emaFrequency);
+        const nearestMidi = Math.round(midiFloat);
+        const note = midiToNote(nearestMidi);
+        const rawCents = centsOff(emaFrequency, nearestMidi);
+        emaCents = emaCents === null
+          ? rawCents
+          : emaCents + CENTS_EMA_ALPHA * (rawCents - emaCents);
+        centsHistory.push(emaCents);
+        if (centsHistory.length > CENTS_AVG_WINDOW) {
+          centsHistory.shift();
+        }
+        const avgCents = centsHistory.reduce((sum, value) => sum + value, 0) / centsHistory.length;
+
+        if (note.label === lastNoteLabel) {
+          stableNoteFrames += 1;
+        } else {
+          lastNoteLabel = note.label;
+          stableNoteFrames = 1;
+        }
+
+        const stableReady = stableNoteFrames >= STABILITY_FRAMES_REQUIRED;
+        const isLockedIn = stableNoteFrames >= LOCK_IN_FRAMES_REQUIRED;
+        if (stableReady && nearestMidi >= MIN_MIDI && nearestMidi <= MAX_MIDI) {
+          setKeyHighlight(nearestMidi);
+        } else {
+          clearKeyHighlight();
+        }
+
+        if (Math.abs(avgCents) >= 0.4) {
+          lastNeedleSign = avgCents >= 0 ? 1 : -1;
+        }
+
+        let displayCents = avgCents;
+        if (!isLockedIn && Math.abs(displayCents) < 1.5) {
+          // Prevent premature perfect-center indication before stable lock-in.
+          displayCents = 1.5 * lastNeedleSign;
+        }
+        if (isLockedIn && Math.abs(displayCents) <= 0.8) {
+          displayCents = 0;
+        }
+
+        if (frameCounter % UI_UPDATE_INTERVAL === 0) {
+          updateUIForPitch(emaFrequency, displayCents, stableReady);
+        }
+      } else {
+        noPitchFrames += 1;
+        if (silenceStartMs === null) {
+          silenceStartMs = performance.now();
+        }
+        const silenceElapsed = performance.now() - silenceStartMs;
+        if (silenceElapsed >= SILENCE_RESET_MS && !silenceCleared) {
+          resetPitchTracking();
+          pitchPanel.style.backgroundColor = "#24322a";
+          needle.style.left = "50%";
+          clearKeyHighlight();
+          silenceCleared = true;
+        }
+        if (frameCounter % UI_UPDATE_INTERVAL === 0) {
+          const stableReady = stableNoteFrames >= STABILITY_FRAMES_REQUIRED;
+          updateUIForPitch(emaFrequency, emaCents ?? 0, stableReady);
+        }
+      }
+
+      animationId = requestAnimationFrame(analyse);
+    }
+
+    async function startMicrophone() {
+      try {
+        if (audioContext) return;
+        if (!AudioContextClass) {
+          statusText.textContent = "Web Audio not supported on this browser.";
+          return;
+        }
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          statusText.textContent = "Microphone API not available on this browser.";
+          return;
+        }
+
+        // iOS Safari: create and resume AudioContext inside direct tap handler.
+        audioContext = new AudioContextClass();
+        if (audioContext.state === "suspended") {
+          await audioContext.resume();
+        }
+
+        if (!window.isSecureContext) {
+          statusText.textContent = "Mic blocked: use HTTPS (or localhost) on iPhone/Safari.";
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+        const source = audioContext.createMediaStreamSource(stream);
+        highPassFilter = audioContext.createBiquadFilter();
+        highPassFilter.type = "highpass";
+        highPassFilter.frequency.value = 80;
+        highPassFilter.Q.value = 0.707;
+
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 8192;
+        analyser.smoothingTimeConstant = 0.1;
+        buffer = new Float32Array(analyser.fftSize);
+
+        source.connect(highPassFilter);
+        highPassFilter.connect(analyser);
+        statusText.textContent = "Listening... sing or hum a steady note.";
+        startBtn.disabled = true;
+        analyse();
+      } catch (err) {
+        if (audioContext && audioContext.state !== "closed") {
+          await audioContext.close();
+        }
+        if (audioContext && audioContext.state === "closed") {
+          audioContext = null;
+        }
+        const blockedByContext = !window.isSecureContext;
+        if (blockedByContext) {
+          statusText.textContent = "Mic blocked by insecure context. Open via HTTPS.";
+        } else if (err && (err.name === "NotAllowedError" || err.name === "SecurityError")) {
+          statusText.textContent = "Microphone permission denied. Allow mic access in Safari.";
+        } else {
+          statusText.textContent = "Microphone unavailable on this device/browser.";
+        }
+        console.error(err);
+      }
+    }
+
+    startBtn.addEventListener("click", startMicrophone);
+
+    window.addEventListener("beforeunload", () => {
+      if (animationId) cancelAnimationFrame(animationId);
+      if (audioContext) audioContext.close();
+    });
+
+    document.documentElement.style.setProperty("--zoom", zoom.toFixed(2));
+  </script>
+</body>
+</html>
