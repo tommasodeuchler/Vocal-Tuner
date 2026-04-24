@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>Voice Pitch Keyboard</title>
   <style>
     :root {
@@ -40,6 +40,9 @@
       align-items: center;
       justify-content: center;
       padding: 24px;
+      overflow: hidden;
+      position: fixed;
+      width: 100%;
     }
 
     .app {
@@ -127,7 +130,9 @@
 
     .keyboard-viewport {
       width: 100%;
-      overflow: hidden;
+      overflow-x: auto;
+      overflow-y: hidden;
+      -webkit-overflow-scrolling: touch;
       position: relative;
     }
 
@@ -135,7 +140,7 @@
       position: relative;
       height: calc(var(--white-key-height) * var(--zoom));
       width: calc(22 * var(--white-key-width) * var(--zoom));
-      margin: 0 auto;
+      margin: 0;
       transform-origin: top left;
       user-select: none;
     }
@@ -190,6 +195,49 @@
       min-height: 1.2rem;
     }
 
+    @media (max-height: 500px) and (orientation: landscape) {
+      :root {
+        --white-key-height: 80px;
+        --black-key-height: 50px;
+      }
+
+      body {
+        padding: 8px;
+      }
+
+      .app {
+        padding: 10px;
+      }
+
+      .top {
+        margin-bottom: 8px;
+      }
+
+      button {
+        padding: 6px 9px;
+        font-size: 0.8rem;
+        border-radius: 8px;
+      }
+
+      .pitch-panel {
+        height: 80px;
+        margin-bottom: 8px;
+      }
+
+      .needle {
+        height: 64px;
+      }
+
+      .keyboard-frame {
+        padding: 8px;
+      }
+
+      .status {
+        margin-top: 6px;
+        font-size: 0.78rem;
+      }
+    }
+
   </style>
 </head>
 <body>
@@ -221,7 +269,7 @@
     const FREQ_EMA_ALPHA = 0.25;
     const CENTS_EMA_ALPHA = 0.08;
     const CENTS_AVG_WINDOW = 8;
-    const UI_UPDATE_INTERVAL = 4;
+    const UI_UPDATE_INTERVAL = 1;
     const STABILITY_FRAMES_REQUIRED = 3;
     const LOCK_IN_FRAMES_REQUIRED = 10;
     const SILENCE_RESET_MS = 2000;
@@ -248,6 +296,7 @@
     let stableNoteFrames = 0;
     let centsHistory = [];
     let lastNeedleSign = 1;
+    let currentActiveMidi = null;
     let silenceStartMs = null;
     let silenceCleared = false;
 
@@ -305,14 +354,18 @@
         currentActiveKey.classList.remove("active");
         currentActiveKey = null;
       }
+      currentActiveMidi = null;
     }
 
     function setKeyHighlight(midi) {
+      if (currentActiveMidi === midi) return;
       clearKeyHighlight();
       const key = keyByMidi.get(midi);
       if (key) {
         key.classList.add("active");
         currentActiveKey = key;
+        currentActiveMidi = midi;
+        key.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
       }
     }
 
@@ -350,7 +403,7 @@
       }
 
       let tauEstimate = -1;
-      const threshold = 0.85;
+      const threshold = 0.10;
       for (let tau = 2; tau < yinSize - 1; tau++) {
         if (yinBuffer[tau] < threshold && yinBuffer[tau] < yinBuffer[tau - 1]) {
           while (tau + 1 < yinSize && yinBuffer[tau + 1] < yinBuffer[tau]) {
@@ -552,8 +605,8 @@
         highPassFilter.Q.value = 0.707;
 
         analyser = audioContext.createAnalyser();
-        analyser.fftSize = 8192;
-        analyser.smoothingTimeConstant = 0.1;
+        analyser.fftSize = 4096;
+        analyser.smoothingTimeConstant = 0;
         buffer = new Float32Array(analyser.fftSize);
 
         source.connect(highPassFilter);
