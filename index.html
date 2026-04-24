@@ -336,16 +336,16 @@
     const WHITE_NOTES = new Set(["C", "D", "E", "F", "G", "A", "B"]);
     const MIN_MIDI = 41; // F2
     const MAX_MIDI = 77; // F5
-    const RMS_THRESHOLD = 0.002;
+    const RMS_THRESHOLD = 0.001;
     const FREQ_EMA_ALPHA = 0.25;
     const DISPLAY_CENTS_ALPHA = 0.05;
-    const COMMIT_BUFFER_SIZE = 30;
+    const COMMIT_BUFFER_SIZE = 20;
     const DOMINANCE_THRESHOLD = 0.5;
-    const MIN_LISTEN_WINDOW_MS = 600;
+    const MIN_LISTEN_WINDOW_MS = 400;
     const COMMIT_INTERVAL_MS = 300;
     const AUTO_SCROLL_DEBOUNCE_MS = 500;
     const SILENCE_RESET_MS = 2000;
-    const YIN_CONFIDENCE_MIN = 0.15;
+    const YIN_CONFIDENCE_MIN = 0.08;
 
     const keyboardEl = document.getElementById("keyboard");
     const startBtn = document.getElementById("startBtn");
@@ -552,7 +552,7 @@
       }
 
       let tauEstimate = -1;
-      const threshold = 0.10;
+      const threshold = 0.08;
       for (let tau = 2; tau < yinSize - 1; tau++) {
         if (yinBuffer[tau] < threshold && yinBuffer[tau] < yinBuffer[tau - 1]) {
           while (tau + 1 < yinSize && yinBuffer[tau + 1] < yinBuffer[tau]) {
@@ -844,7 +844,13 @@
           await audioContext.resume();
         }
 
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false
+          }
+        });
         micStream = stream;
 
         const source = audioContext.createMediaStreamSource(stream);
